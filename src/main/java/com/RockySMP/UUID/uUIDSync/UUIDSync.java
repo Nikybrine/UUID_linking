@@ -76,6 +76,7 @@ public class UUIDSync extends JavaPlugin {
         String createTableSQL = "CREATE TABLE IF NOT EXISTS linked_accounts ("
                 + "uuid VARCHAR(36) NOT NULL, "
                 + "discord_id VARCHAR(50) NOT NULL, "
+                + "verified BOOLEAN DEFAULT FALSE, "
                 + "PRIMARY KEY (uuid));";
         try (PreparedStatement statement = connection.prepareStatement(createTableSQL)) {
             statement.executeUpdate();
