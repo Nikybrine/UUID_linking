@@ -12,14 +12,14 @@ const client = new Client({
 });
 
 const dbConnection = mysql.createConnection({
-  host: "localhost",
-  user: "Nick",
-  password: "123",
-  database: "test",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB,
 });
 
 const sentMessages = new Set();
-const pendingConfirmations = new Map(); // Map für die laufenden Bestätigungen
+const pendingConfirmations = new Map();
 
 client.once("ready", () => {
   console.log("Discord Bot ist bereit!");
@@ -61,7 +61,7 @@ function checkDatabaseForPendingLinks() {
                     .then(() => {
                       console.log(`Bestätigungsanfrage an ${discordUsername} gesendet.`);
                       sentMessages.add(discordUsername);
-                      pendingConfirmations.set(member.id, row.uuid); // UUID speichern
+                      pendingConfirmations.set(member.id, row.uuid);
                     })
                     .catch((err) => {
                       console.error(`Fehler beim Senden der Nachricht an ${discordUsername}:`, err);
@@ -83,8 +83,8 @@ function checkDatabaseForPendingLinks() {
 client.on("messageCreate", (message) => {
   if (message.author.bot) return;
   if (message.content.toLowerCase() === "y") {
-    const discordUserId = message.author.id; // Die ID des Nutzers
-    const uuid = pendingConfirmations.get(discordUserId); // UUID abrufen
+    const discordUserId = message.author.id;
+    const uuid = pendingConfirmations.get(discordUserId);
 
     if (uuid) {
       console.log(`Überprüfung für Username: ${message.author.username}`);
@@ -100,7 +100,7 @@ client.on("messageCreate", (message) => {
           }
           if (results.affectedRows > 0) {
             message.reply("Dein Minecraft-Account wurde erfolgreich bestätigt!");
-            pendingConfirmations.delete(discordUserId); // UUID entfernen
+            pendingConfirmations.delete(discordUserId);
             sentMessages.delete(message.author.username.toLowerCase());
           } else {
             console.log(`Keine Verknüpfung gefunden für Username: ${message.author.username}`);
