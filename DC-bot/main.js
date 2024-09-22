@@ -26,61 +26,48 @@ client.once("ready", () => {
   checkDatabaseForPendingLinks();
 });
 
-function checkDatabaseForPendingLinks() {
-  setInterval(() => {
-    dbConnection.query(
-      "SELECT uuid, discord_id FROM linked_accounts WHERE confirmed = 0",
-      (error, results) => {
-        if (error) {
-          console.error("Fehler bei der Datenbankabfrage:", error);
-          return;
-        }
-
-        if (results.length === 0) {
-          console.log("Keine ausstehenden Verknüpfungen gefunden");
-          return;
-        }
-
-        results.forEach((row) => {
-          const discordUsername = row.discord_id;
-
-          if (sentMessages.has(discordUsername)) return;
-
-          console.log(`Verarbeite Verknüpfung für ${discordUsername}`);
-
-          client.guilds.cache.forEach((guild) => {
-            guild.members
-              .fetch({ query: discordUsername, limit: 1 })
-              .then((members) => {
-                const member = members.first();
-                if (member) {
-                  member
-                    .send(
-                      `Bitte bestätige deine Verknüpfung zu deinem Minecraft-Account: ${row.uuid}. Antworte mit 'y' um die Verknüpfung abzuschließen.`
-                    )
-                    .then(() => {
-                      console.log(`Bestätigungsanfrage an ${discordUsername} gesendet.`);
-                      sentMessages.add(discordUsername);
-                      pendingConfirmations.set(member.id, row.uuid);
-                    })
-                    .catch((err) => {
-                      console.error(`Fehler beim Senden der Nachricht an ${discordUsername}:`, err);
-                    });
-                } else {
-                  console.log(`Benutzer ${discordUsername} nicht im Server gefunden`);
-                }
-              })
-              .catch((err) => {
-                console.error("Fehler beim Fetchen der Mitglieder:", err);
-              });
-          });
-        });
-      }
-    );
-  }, 15000);
+async function sendConfirmationMessage(member, uuid) {
+  try {
+    await member.send(`Bitte bestätige deine Verknüpfung zu deinem Minecraft-Account: ${uuid}. Antworte mit 'y' um die Verknüpfung abzuschließen.`);
+    sentMessages.add(member.user.username.toLowerCase());
+    pendingConfirmations.set(member.id, uuid);
+    console.log(`Bestätigungsanfrage an ${member.user.username} gesendet.`);
+  } catch (err) {
+    console.error(`Fehler beim Senden der Nachricht an ${member.user.username}:`, err);
+  }
 }
 
-client.on("messageCreate", (message) => {
+async function processPendingLinks() {
+  const [results] = await dbConnection.promise().query("SELECT uuid, discord_id FROM linked_accounts WHERE confirmed = 0");
+  if (results.length === 0) {
+    console.log("Keine ausstehenden Verknüpfungen gefunden");
+    return;
+  }
+
+  for (const row of results) {
+    const discordUsername = row.discord_id.toLowerCase();
+    if (sentMessages.has(discordUsername)) continue;
+
+    console.log(`Verarbeite Verknüpfung für ${discordUsername}`);
+    const guilds = client.guilds.cache;
+
+    for (const guild of guilds.values()) {
+      const members = await guild.members.fetch({ query: discordUsername, limit: 1 });
+      const member = members.first();
+      if (member) {
+        await sendConfirmationMessage(member, row.uuid);
+      } else {
+        console.log(`Benutzer ${discordUsername} nicht im Server gefunden`);
+      }
+    }
+  }
+}
+
+function checkDatabaseForPendingLinks() {
+  setInterval(processPendingLinks, 15000);
+}
+
+client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   if (message.content.toLowerCase() === "y") {
     const discordUserId = message.author.id;
@@ -88,31 +75,20 @@ client.on("messageCreate", (message) => {
 
     if (uuid) {
       console.log(`Überprüfung für Username: ${message.author.username}`);
+      const [results] = await dbConnection.promise().query("UPDATE linked_accounts SET confirmed = 1 WHERE discord_id = ?", [message.author.username.toLowerCase()]);
 
-      dbConnection.query(
-        "UPDATE linked_accounts SET confirmed = 1 WHERE discord_id = ?",
-        [message.author.username.toLowerCase()],
-        (error, results) => {
-          if (error) {
-            console.error("Fehler bei der Aktualisierung:", error);
-            message.reply("Ein Fehler ist aufgetreten. Bitte versuche es später erneut.");
-            return;
-          }
-          if (results.affectedRows > 0) {
-            message.reply("Dein Minecraft-Account wurde erfolgreich bestätigt!");
-            pendingConfirmations.delete(discordUserId);
-            sentMessages.delete(message.author.username.toLowerCase());
-          } else {
-            console.log(`Keine Verknüpfung gefunden für Username: ${message.author.username}`);
-            message.reply("Keine Verknüpfung gefunden, bitte versuche es erneut.");
-          }
-        }
-      );
+      if (results.affectedRows > 0) {
+        message.reply("Dein Minecraft-Account wurde erfolgreich bestätigt!");
+        pendingConfirmations.delete(discordUserId);
+        sentMessages.delete(message.author.username.toLowerCase());
+      } else {
+        console.log(`Keine Verknüpfung gefunden für Username: ${message.author.username}`);
+        message.reply("Keine Verknüpfung gefunden, bitte versuche es erneut.");
+      }
     } else {
       message.reply("Du hast keine Bestätigungsanfrage gesendet oder die Zeit ist abgelaufen.");
     }
   }
 });
-
 
 client.login(process.env.BOT_TOKEN);
